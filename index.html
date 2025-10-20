@@ -1,0 +1,424 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>프랑스어 발음 스피드 게임</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body { margin: 0; padding: 0; font-family: system-ui, -apple-system, sans-serif; }
+    </style>
+</head>
+<body>
+    <div id="app"></div>
+
+    <script>
+        // 게임 상태
+        let gameState = 'start';
+        let currentWord = null;
+        let score = 0;
+        let timeLeft = 120;
+        let isListening = false;
+        let feedback = '';
+        let nickname = '';
+        let leaderboard = [];
+        let recognition = null;
+        let timerInterval = null;
+
+        // 프랑스어 단어
+        const frenchWords = [
+            { french: 'bonjour', korean: '안녕하세요' },
+            { french: 'merci', korean: '감사합니다' },
+            { french: 'chat', korean: '고양이' },
+            { french: 'chien', korean: '개' },
+            { french: 'maison', korean: '집' },
+            { french: 'eau', korean: '물' },
+            { french: 'pain', korean: '빵' },
+            { french: 'livre', korean: '책' },
+            { french: 'soleil', korean: '태양' },
+            { french: 'lune', korean: '달' },
+            { french: 'fleur', korean: '꽃' },
+            { french: 'arbre', korean: '나무' },
+            { french: 'ami', korean: '친구' },
+            { french: 'école', korean: '학교' },
+            { french: 'rouge', korean: '빨강' },
+            { french: 'bleu', korean: '파랑' },
+            { french: 'vert', korean: '초록' },
+            { french: 'noir', korean: '검정' },
+            { french: 'blanc', korean: '하양' },
+            { french: 'café', korean: '커피' }
+        ];
+
+        // 리더보드 로드
+        function loadLeaderboard() {
+            const saved = localStorage.getItem('frenchGameLeaderboard');
+            if (saved) {
+                leaderboard = JSON.parse(saved);
+            }
+        }
+
+        // 점수 저장
+        function saveScore() {
+            const newEntry = {
+                nickname: nickname,
+                score: score,
+                date: new Date().toISOString()
+            };
+            
+            leaderboard.push(newEntry);
+            leaderboard.sort((a, b) => b.score - a.score);
+            leaderboard = leaderboard.slice(0, 28);
+            
+            localStorage.setItem('frenchGameLeaderboard', JSON.stringify(leaderboard));
+        }
+
+        // 랜덤 단어
+        function getRandomWord() {
+            const randomIndex = Math.floor(Math.random() * frenchWords.length);
+            currentWord = frenchWords[randomIndex];
+            feedback = '';
+            render();
+        }
+
+        // 게임 시작
+        function startGame() {
+            const input = document.getElementById('nicknameInput');
+            if (input) {
+                nickname = input.value.trim();
+            }
+            
+            if (!nickname) {
+                alert('별명을 입력해주세요!');
+                return;
+            }
+            
+            gameState = 'playing';
+            score = 0;
+            timeLeft = 120;
+            feedback = '';
+            getRandomWord();
+            startTimer();
+        }
+
+        // 타이머 시작
+        function startTimer() {
+            if (timerInterval) clearInterval(timerInterval);
+            
+            timerInterval = setInterval(() => {
+                timeLeft--;
+                if (timeLeft <= 0) {
+                    clearInterval(timerInterval);
+                    gameState = 'end';
+                    saveScore();
+                    render();
+                } else {
+                    render();
+                }
+            }, 1000);
+        }
+
+        // 발음 듣기
+        function playSound() {
+            if (currentWord && 'speechSynthesis' in window) {
+                window.speechSynthesis.cancel();
+                
+                const speak = () => {
+                    const utterance = new SpeechSynthesisUtterance(currentWord.french);
+                    const voices = window.speechSynthesis.getVoices();
+                    const frenchVoice = voices.find(v => v.lang.startsWith('fr'));
+                    
+                    if (frenchVoice) utterance.voice = frenchVoice;
+                    utterance.lang = 'fr-FR';
+                    utterance.rate = 0.8;
+                    utterance.pitch = 1;
+                    utterance.volume = 1;
+                    
+                    window.speechSynthesis.speak(utterance);
+                };
+
+                if (window.speechSynthesis.getVoices().length > 0) {
+                    speak();
+                } else {
+                    window.speechSynthesis.onvoiceschanged = speak;
+                }
+            }
+        }
+
+        // 정확도 계산
+        function calculateAccuracy(spoken, target) {
+            spoken = spoken.toLowerCase().replace(/[^a-zàâäæçéèêëïîôùûüÿœ]/g, '');
+            target = target.toLowerCase().replace(/[^a-zàâäæçéèêëïîôùûüÿœ]/g, '');
+            
+            if (spoken === target) return 100;
+            
+            const distance = levenshteinDistance(spoken, target);
+            const maxLength = Math.max(spoken.length, target.length);
+            const accuracy = Math.max(0, ((maxLength - distance) / maxLength) * 100);
+            
+            return Math.round(accuracy * 10) / 10;
+        }
+
+        function levenshteinDistance(str1, str2) {
+            const matrix = [];
+            for (let i = 0; i <= str2.length; i++) matrix[i] = [i];
+            for (let j = 0; j <= str1.length; j++) matrix[0][j] = j;
+            
+            for (let i = 1; i <= str2.length; i++) {
+                for (let j = 1; j <= str1.length; j++) {
+                    if (str2.charAt(i - 1) === str1.charAt(j - 1)) {
+                        matrix[i][j] = matrix[i - 1][j - 1];
+                    } else {
+                        matrix[i][j] = Math.min(
+                            matrix[i - 1][j - 1] + 1,
+                            matrix[i][j - 1] + 1,
+                            matrix[i - 1][j] + 1
+                        );
+                    }
+                }
+            }
+            return matrix[str2.length][str1.length];
+        }
+
+        // 음성 인식
+        function startListening() {
+            try {
+                if (!('webkitSpeechRecognition' in window) && !('SpeechRecognition' in window)) {
+                    feedback = '이 브라우저는 음성 인식을 지원하지 않습니다. Chrome을 사용해주세요.';
+                    render();
+                    return;
+                }
+
+                const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+                recognition = new SpeechRecognition();
+                
+                recognition.lang = 'fr-FR';
+                recognition.continuous = false;
+                recognition.interimResults = false;
+
+                recognition.onstart = () => {
+                    isListening = true;
+                    feedback = '🎤 듣고 있습니다... 발음해보세요!';
+                    render();
+                };
+
+                recognition.onresult = (event) => {
+                    const transcript = event.results[0][0].transcript;
+                    const accuracy = calculateAccuracy(transcript, currentWord.french);
+                    
+                    feedback = '발음: "' + transcript + '" | 정확도: ' + accuracy + '%';
+                    
+                    if (accuracy >= 70) {
+                        const points = accuracy / 10;
+                        score = Math.round((score + points) * 10) / 10;
+                        feedback = '✅ 정확도: ' + accuracy + '% | +' + points.toFixed(1) + '점!';
+                        render();
+                        setTimeout(() => {
+                            getRandomWord();
+                        }, 1500);
+                    } else {
+                        feedback = '❌ 정확도: ' + accuracy + '% | 70% 이상 필요합니다. 다시 시도하세요!';
+                        render();
+                    }
+                };
+
+                recognition.onerror = (event) => {
+                    isListening = false;
+                    if (event.error === 'no-speech') {
+                        feedback = '음성이 감지되지 않았습니다. 다시 시도하세요.';
+                    } else if (event.error === 'not-allowed') {
+                        feedback = '마이크 권한을 허용해주세요.';
+                    } else {
+                        feedback = '오류: ' + event.error + '. 다시 시도하세요.';
+                    }
+                    render();
+                };
+
+                recognition.onend = () => {
+                    isListening = false;
+                    render();
+                };
+
+                recognition.start();
+            } catch (error) {
+                isListening = false;
+                feedback = '음성 인식 시작 오류. Chrome 브라우저를 사용해주세요.';
+                render();
+            }
+        }
+
+        function stopListening() {
+            if (recognition) {
+                recognition.stop();
+                isListening = false;
+                render();
+            }
+        }
+
+        // 시간 포맷
+        function formatTime(seconds) {
+            const mins = Math.floor(seconds / 60);
+            const secs = seconds % 60;
+            return mins + ':' + secs.toString().padStart(2, '0');
+        }
+
+        // 아이콘 SVG
+        function volumeIcon() {
+            return '<svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon><path d="M15.54 8.46a5 5 0 0 1 0 7.07"></path><path d="M19.07 4.93a10 10 0 0 1 0 14.14"></path></svg>';
+        }
+
+        function micIcon() {
+            return '<svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"></path><path d="M19 10v2a7 7 0 0 1-14 0v-2"></path><line x1="12" x2="12" y1="19" y2="22"></line></svg>';
+        }
+
+        function micOffIcon() {
+            return '<svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="2" x2="22" y1="2" y2="22"></line><path d="M18.89 13.23A7.12 7.12 0 0 0 19 12v-2"></path><path d="M5 10v2a7 7 0 0 0 12 5"></path><path d="M15 9.34V5a3 3 0 0 0-5.68-1.33"></path><path d="M9 9v3a3 3 0 0 0 5.12 2.12"></path><line x1="12" x2="12" y1="19" y2="22"></line></svg>';
+        }
+
+        // 렌더링
+        function render() {
+            const app = document.getElementById('app');
+            
+            if (gameState === 'start') {
+                app.innerHTML = `
+                    <div class="min-h-screen bg-gradient-to-br from-blue-400 to-purple-500 flex items-center justify-center p-4">
+                        <div class="bg-white rounded-2xl shadow-2xl p-12 text-center max-w-md w-full">
+                            <h1 class="text-4xl font-bold text-gray-800 mb-4">🇫🇷 프랑스어 발음</h1>
+                            <h2 class="text-3xl font-bold text-purple-600 mb-6">스피드 게임</h2>
+                            <p class="text-gray-600 mb-8 text-lg">
+                                2분 동안 프랑스어 단어를<br>
+                                정확하게 발음해보세요!<br>
+                                <span class="text-sm mt-2 block">정확도 70% 이상이면 점수 획득!</span>
+                            </p>
+                            <div class="mb-8">
+                                <input
+                                    type="text"
+                                    id="nicknameInput"
+                                    placeholder="별명을 입력하세요"
+                                    maxlength="15"
+                                    class="w-full px-6 py-3 text-lg border-2 border-purple-300 rounded-full focus:outline-none focus:border-purple-500 text-center"
+                                />
+                            </div>
+                            <button
+                                onclick="startGame()"
+                                class="bg-gradient-to-r from-purple-500 to-pink-500 text-white px-12 py-4 rounded-full text-xl font-bold hover:shadow-lg transform hover:scale-105 transition w-full"
+                            >
+                                게임 시작
+                            </button>
+                        </div>
+                    </div>
+                `;
+                
+                const input = document.getElementById('nicknameInput');
+                if (input) {
+                    input.addEventListener('keypress', (e) => {
+                        if (e.key === 'Enter') startGame();
+                    });
+                }
+            } else if (gameState === 'end') {
+                const currentRank = leaderboard.findIndex(entry => 
+                    entry.nickname === nickname && entry.score === score
+                ) + 1;
+
+                let leaderboardHTML = '';
+                if (leaderboard.length === 0) {
+                    leaderboardHTML = '<p class="text-gray-500 text-center py-8">아직 기록이 없습니다</p>';
+                } else {
+                    leaderboard.forEach((entry, index) => {
+                        const isCurrentUser = entry.nickname === nickname && entry.score === score && index === currentRank - 1;
+                        const medal = index === 0 ? '🥇' : index === 1 ? '🥈' : index === 2 ? '🥉' : (index + 1) + '위';
+                        
+                        leaderboardHTML += `
+                            <div class="flex items-center justify-between p-4 rounded-xl ${isCurrentUser ? 'bg-gradient-to-r from-yellow-200 to-orange-200 border-2 border-yellow-400' : 'bg-gray-100'}">
+                                <div class="flex items-center gap-3">
+                                    <span class="text-2xl font-bold ${index < 3 ? 'text-yellow-500' : 'text-gray-600'}">${medal}</span>
+                                    <span class="font-semibold text-gray-800 text-lg">${entry.nickname}</span>
+                                </div>
+                                <span class="text-2xl font-bold text-purple-600">${entry.score}점</span>
+                            </div>
+                        `;
+                    });
+                }
+
+                app.innerHTML = `
+                    <div class="min-h-screen bg-gradient-to-br from-purple-400 to-pink-500 flex items-center justify-center p-4">
+                        <div class="max-w-4xl w-full grid md:grid-cols-2 gap-6">
+                            <div class="bg-white rounded-2xl shadow-2xl p-8 text-center">
+                                <h1 class="text-4xl font-bold text-gray-800 mb-4">게임 끝!</h1>
+                                <div class="bg-gradient-to-r from-yellow-400 to-orange-400 rounded-xl p-6 mb-4">
+                                    <p class="text-white text-xl mb-1">플레이어</p>
+                                    <p class="text-white text-3xl font-bold mb-3">${nickname}</p>
+                                    <p class="text-white text-lg mb-1">최종 점수</p>
+                                    <p class="text-white text-5xl font-bold">${score}점</p>
+                                    ${currentRank > 0 ? '<p class="text-white text-2xl font-bold mt-3">🏆 ' + currentRank + '등</p>' : ''}
+                                </div>
+                                <button
+                                    onclick="gameState='start'; nickname=''; render();"
+                                    class="bg-gradient-to-r from-blue-500 to-purple-500 text-white px-8 py-3 rounded-full text-lg font-bold hover:shadow-lg transform hover:scale-105 transition w-full"
+                                >
+                                    시작 화면으로
+                                </button>
+                            </div>
+                            <div class="bg-white rounded-2xl shadow-2xl p-8">
+                                <h2 class="text-3xl font-bold text-gray-800 mb-6 text-center">🏆 리더보드 TOP 28</h2>
+                                <div class="space-y-3 max-h-96 overflow-y-auto">
+                                    ${leaderboardHTML}
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                `;
+            } else {
+                app.innerHTML = `
+                    <div class="min-h-screen bg-gradient-to-br from-indigo-400 to-cyan-400 p-4">
+                        <div class="max-w-2xl mx-auto">
+                            <div class="flex justify-between items-center mb-8 bg-white rounded-xl shadow-lg p-4">
+                                <div class="flex items-center gap-6">
+                                    <div class="text-center">
+                                        <p class="text-sm text-gray-600">타이머</p>
+                                        <p class="text-3xl font-bold text-red-500">${formatTime(timeLeft)}</p>
+                                    </div>
+                                    <div class="text-center">
+                                        <p class="text-sm text-gray-600">점수</p>
+                                        <p class="text-3xl font-bold text-green-500">${score}점</p>
+                                    </div>
+                                </div>
+                            </div>
+                            ${currentWord ? `
+                                <div class="bg-white rounded-3xl shadow-2xl p-12 text-center">
+                                    <h2 class="text-6xl font-bold text-gray-800 mb-6">${currentWord.french}</h2>
+                                    <p class="text-3xl text-gray-600 mb-8">${currentWord.korean}</p>
+                                    <div class="flex justify-center gap-6 mb-8">
+                                        <button
+                                            onclick="playSound()"
+                                            class="bg-blue-500 hover:bg-blue-600 text-white p-6 rounded-full shadow-lg transform hover:scale-110 transition"
+                                            title="발음 듣기"
+                                        >
+                                            ${volumeIcon()}
+                                        </button>
+                                        <button
+                                            onclick="${isListening ? 'stopListening()' : 'startListening()'}"
+                                            class="${isListening ? 'bg-red-500 hover:bg-red-600' : 'bg-green-500 hover:bg-green-600'} text-white p-6 rounded-full shadow-lg transform hover:scale-110 transition"
+                                            title="${isListening ? '녹음 중지' : '발음하기'}"
+                                        >
+                                            ${isListening ? micOffIcon() : micIcon()}
+                                        </button>
+                                    </div>
+                                    ${feedback ? `
+                                        <div class="bg-purple-100 border-2 border-purple-300 rounded-xl p-4">
+                                            <p class="text-lg text-purple-800 font-semibold">${feedback}</p>
+                                        </div>
+                                    ` : ''}
+                                </div>
+                            ` : ''}
+                        </div>
+                    </div>
+                `;
+            }
+        }
+
+        // 초기화
+        loadLeaderboard();
+        render();
+    </script>
+</body>
+</html>
